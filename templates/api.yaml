@@ -1,0 +1,138 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: {{ template "fullname" . }}-api
+  labels:
+    app: {{ template "name" . }}-api
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ template "name" . }}-api
+        release: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ template "fullname" . }}-api
+      volumes:
+      - name: {{ template "fullname" . }}-api-config
+        emptyDir: {
+          medium: Memory
+        }
+      initContainers:
+        - name: {{ template "fullname" . }}-api-vault
+          image: karabijavad/vault-init-config:latest
+          env:
+            - name: VAULT_ADDR
+              value: {{ .Values.vault.addr }}
+            - name: VAULT_ROLE
+              value: {{ .Values.api.vault.role }}
+            - name: VAULT_SECRET
+              value: {{ .Values.api.vault.secret }}
+          volumeMounts:
+            - name: {{ template "fullname" . }}-api-config
+              mountPath: /vault-init-config
+      containers:
+        - name: {{ template "fullname" . }}-api
+          image: {{ .Values.api.image.repository }}:{{ .Values.api.image.tag }}
+          imagePullPolicy: {{ .Values.api.image.pullPolicy }}
+          volumeMounts:
+            - name: {{ template "fullname" . }}-api-config
+              mountPath: /home/showlist/showlist_api/.env
+              subPath: .env
+          resources:
+            requests:
+              cpu: 100m
+              memory: "256Mi"
+            limits:
+              memory: "512Mi"
+          envFrom:
+          - configMapRef:
+              name: {{ template "fullname" . }}-api
+          ports:
+            - containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "fullname" . }}-api
+  labels:
+    app: {{ template "name" . }}-api
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  ports:
+    - port: 8000
+      targetPort: 8000
+  selector:
+    app: {{ template "name" . }}-api
+    release: {{ .Release.Name }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "fullname" . }}-api
+  labels:
+    app: {{ template "name" . }}-api
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+{{ toYaml .Values.api.config | indent 4 }}
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: {{ template "fullname" . }}-api
+  labels:
+    app: {{ template "name" . }}-api
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+  - host: {{ .Values.api.host }}
+    http:
+      paths:
+      - backend:
+          serviceName: {{ template "fullname" . }}-api
+          servicePort: 8000
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ template "fullname" . }}-api
+  labels:
+    app: {{ template "name" . }}-api
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  maxReplicas: 20
+  minReplicas: 1
+  scaleTargetRef:
+    kind: Deployment
+    name: {{ template "fullname" . }}-api
+  targetCPUUtilizationPercentage: 80
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ template "fullname" . }}-api
+  labels:
+    app: {{ template "name" . }}-api
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}

@@ -1,0 +1,114 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "fullname" . }}-www
+  labels:
+    app: {{ template "name" . }}-www
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+{{ toYaml .Values.www.config | indent 4 }}
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: {{ template "fullname" . }}-www
+  labels:
+    app: {{ template "name" . }}-www
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ template "name" . }}-www
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: {{ template "fullname" . }}-www
+          image: {{ .Values.www.image.repository }}:{{ .Values.www.image.tag }}
+          imagePullPolicy: {{ .Values.www.image.pullPolicy }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: "256Mi"
+            limits:
+              memory: "512Mi"
+          envFrom:
+          - configMapRef:
+              name: {{ template "fullname" . }}-www
+          ports:
+            - containerPort: 8000
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "fullname" . }}-www
+  labels:
+    app: {{ template "name" . }}-www
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  ports:
+    - { port: 8000, targetPort: 8000 }
+  selector:
+    app: {{ template "name" . }}-www
+    release: {{ .Release.Name }}
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: {{ template "fullname" . }}-www
+  labels:
+    app: {{ template "name" . }}-www
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    kubernetes.io/ingress.class: traefik
+spec:
+  rules:
+  - host: {{ .Values.www.host }}
+    http:
+      paths:
+      - backend:
+          serviceName: {{ template "fullname" . }}-www
+          servicePort: 8000
+---
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ template "fullname" . }}-www
+  labels:
+    app: {{ template "name" . }}-www
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  maxReplicas: 20
+  minReplicas: 1
+  scaleTargetRef:
+    kind: Deployment
+    name: {{ template "fullname" . }}-www
+  targetCPUUtilizationPercentage: 80
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ template "fullname" . }}-www
+  labels:
+    app: {{ template "name" . }}-www
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}

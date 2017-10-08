@@ -1,0 +1,120 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: showlist-public-proxy
+  labels:
+    app: showlist-public-proxy
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 35.202.32.150
+  ports:
+    - { port: 80, targetPort: 80, name: http }
+    - { port: 443, targetPort: 443, name: https }
+    - { port: 8080, targetPort: 8080, name: admin }
+  selector:
+    app: showlist-public-proxy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: showlist-public-proxy-config
+  labels:
+    app: showlist-public-proxy
+data:
+  traefik.toml: |-
+    logLevel = "INFO"
+    defaultEntryPoints = ["http", "https"]
+    [entryPoints]
+        [entryPoints.http]
+        address = ":80"
+        compress = true
+        [entryPoints.http.redirect]
+        entryPoint = "https"
+        [entryPoints.https]
+        address = ":443"
+        compress = true
+        [entryPoints.https.redirect]
+          regex = "^https://showlist.fyi/(.*)"
+          replacement = "https://www.showlist.fyi/$1"
+        [entryPoints.https.tls]
+            [[entryPoints.https.tls.certificates]]
+            CertFile = "/ssl/tls.crt"
+            KeyFile = "/ssl/tls.key"
+    [web]
+    [kubernetes]
+    namespaces=["default"]
+    labelselector="app=showlist-proxy,release=oily-elk"
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: showlist-public-proxy
+  labels:
+    app: showlist-public-proxy
+spec:
+  template:
+    metadata:
+      labels:
+        app: showlist-public-proxy
+    spec:
+      serviceAccountName: showlist-public-proxy
+      volumes:
+        - name: showlist-public-proxy-config
+          configMap: { name: showlist-public-proxy-config }
+        - name: showlist-public-proxy-tls
+          secret: { secretName: showlist-public-proxy-tls }
+      containers:
+        - name: showlist-public-proxy
+          volumeMounts:
+          - { name: showlist-public-proxy-config, mountPath: /etc/traefik/ }
+          - { name: showlist-public-proxy-tls, mountPath: /ssl/, readOnly: true }
+          image: traefik:1.4.0-rc3
+          ports:
+            [ { containerPort: 80 },  { containerPort: 443 }, { containerPort: 8080 }]
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: showlist-public-proxy-tls
+  labels:
+    app: showlist-public-proxy
+type: Opaque
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUZNekNDQkJ1Z0F3SUJBZ0lTQkt4ZWRkTitRNS9sVTNyVkl2WVUzMUsxTUEwR0NTcUdTSWIzRFFFQkN3VUEKTUVveEN6QUpCZ05WQkFZVEFsVlRNUll3RkFZRFZRUUtFdzFNWlhRbmN5QkZibU55ZVhCME1TTXdJUVlEVlFRRApFeHBNWlhRbmN5QkZibU55ZVhCMElFRjFkR2h2Y21sMGVTQllNekFlRncweE56QTVNalF5TWpNNE1EQmFGdzB4Ck56RXlNak15TWpNNE1EQmFNQmN4RlRBVEJnTlZCQU1UREhOb2IzZHNhWE4wTG1aNWFUQ0NBU0l3RFFZSktvWkkKaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFMTGNzYWUrT2tEZi8yWXh4YWJCMnNiWG5RYlZYN1o1aVF1dAo2WWVGNk0vc1JHUTZpUlEwdXdmMkNDdDgxbW1kT3J4c1pXOFFuOTBVWitHTGRmWVlKQ3haZ2t1emd2NHJmSWI0CndrUlBFUEZ0Mmw4Z1dORUdEN2lQOExJU2FDTlFvMDFnSzk4cXR1bCtCd0lkdzhyMVczYU1KM3FDMG5xZ29vbnoKbStmc1kySERJSkVoTDZILzU0NTlNVU4rd0Q5eW1IVE1CL3FGUnpzamNKVUg4VFY0OVd5MWRBdFhVbTIzcHhTaApzTWRtczJxVzhKUklYSFpZNk9jZ0RIV1gvSUp1WHR2T05EanRFNk5DaEo1TXlBQ3NaNStSNDhsTSs3bkJJZGRKClNMWkFxQk1OcHZCV2tlWk9OWjhXMXFGZU9kdnJKVUhrT2MxZFFHQ1hTcGJOUURoQzVVc0NBd0VBQWFPQ0FrUXcKZ2dKQU1BNEdBMVVkRHdFQi93UUVBd0lGb0RBZEJnTlZIU1VFRmpBVUJnZ3JCZ0VGQlFjREFRWUlLd1lCQlFVSApBd0l3REFZRFZSMFRBUUgvQkFJd0FEQWRCZ05WSFE0RUZnUVVCcHh5NkN3MmZwOHZDTWp3L1dROUgzK3hUTFl3Ckh3WURWUjBqQkJnd0ZvQVVxRXBxWXdSOTNicm0wVG0zcGtWbDcvT283S0V3YndZSUt3WUJCUVVIQVFFRVl6QmgKTUM0R0NDc0dBUVVGQnpBQmhpSm9kSFJ3T2k4dmIyTnpjQzVwYm5RdGVETXViR1YwYzJWdVkzSjVjSFF1YjNKbgpNQzhHQ0NzR0FRVUZCekFDaGlOb2RIUndPaTh2WTJWeWRDNXBiblF0ZURNdWJHVjBjMlZ1WTNKNWNIUXViM0puCkx6QlBCZ05WSFJFRVNEQkdnaEJoY0drdWMyaHZkMnhwYzNRdVpubHBnZ3h6YUc5M2JHbHpkQzVtZVdtQ0VuWmgKZFd4MExuTm9iM2RzYVhOMExtWjVhWUlRZDNkM0xuTm9iM2RzYVhOMExtWjVhVENCL2dZRFZSMGdCSUgyTUlIegpNQWdHQm1lQkRBRUNBVENCNWdZTEt3WUJCQUdDM3hNQkFRRXdnZFl3SmdZSUt3WUJCUVVIQWdFV0dtaDBkSEE2Ckx5OWpjSE11YkdWMGMyVnVZM0o1Y0hRdWIzSm5NSUdyQmdnckJnRUZCUWNDQWpDQm5neUJtMVJvYVhNZ1EyVnkKZEdsbWFXTmhkR1VnYldGNUlHOXViSGtnWW1VZ2NtVnNhV1ZrSUhWd2IyNGdZbmtnVW1Wc2VXbHVaeUJRWVhKMAphV1Z6SUdGdVpDQnZibXg1SUdsdUlHRmpZMjl5WkdGdVkyVWdkMmwwYUNCMGFHVWdRMlZ5ZEdsbWFXTmhkR1VnClVHOXNhV041SUdadmRXNWtJR0YwSUdoMGRIQnpPaTh2YkdWMGMyVnVZM0o1Y0hRdWIzSm5MM0psY0c5emFYUnYKY25rdk1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQm1WMEdiT05GZzA3REhSc05xdkdrTXFsaGdKMUErUVVXcwpXemdzOHQxbG9XMjhvSnZwNStrT3kxS0xJWjVRQk1DU1piQjMzeTlPaEdiTFZ5bjVsd0toQzFQc3hzRjNEM28rCmh4QUZsLzVGdXJkeFA4eHJMZDV0MVNiK0tMMXl4S2ZzN1FzQUVMNWZHQ1V5cW9BZ1ZFUWd3RHhTSEJaZXUzK3kKSkY4Wm9UQUVwWTBCcnpmZFBIRHpVTVVoMk5mTEJyNURJMDRLczUxVmh5VDMyb0F5MWx2a0REZlhldm5ZNjRHSgpoT2FxaEhwUTFjditXeEI4QjlaUjdCRGdGYzgrTytMNmk5eCtMYTFvSEZSWGtHb0FnUW9aWTN2djIvWGxsbHNvCjBLdU9aRFkvQlZMS25SdjdvSnF3NkZZblB0YkFWbFo5TlNaYjlmd0ErUjhFa0w5Vzc1ZlUKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRQ3kzTEdudmpwQTMvOW0KTWNXbXdkckcxNTBHMVYrMmVZa0xyZW1IaGVqUDdFUmtPb2tVTkxzSDlnZ3JmTlpwblRxOGJHVnZFSi9kRkdmaAppM1gyR0NRc1dZSkxzNEwrSzN5RytNSkVUeER4YmRwZklGalJCZys0ai9DeUVtZ2pVS05OWUN2ZktyYnBmZ2NDCkhjUEs5VnQyakNkNmd0SjZvS0tKODV2bjdHTmh3eUNSSVMraC8rZU9mVEZEZnNBL2NwaDB6QWY2aFVjN0kzQ1YKQi9FMWVQVnN0WFFMVjFKdHQ2Y1VvYkRIWnJOcWx2Q1VTRngyV09qbklBeDFsL3lDYmw3YnpqUTQ3Uk9qUW9TZQpUTWdBckdlZmtlUEpUUHU1d1NIWFNVaTJRS2dURGFid1ZwSG1UaldmRnRhaFhqbmI2eVZCNURuTlhVQmdsMHFXCnpVQTRRdVZMQWdNQkFBRUNnZ0VCQUxLMEs5QUVFT0hXcTYrb1ZPbHEwREpSSkxPNkpub0RiZmk4VnhJdnFjOXMKS1Z6VzJ6VFVCblpLekJqZkRyN1E5K2xnaCt2eStUYUM5OU55YW5acDRtSnBQL1J3czVWTlQ0cnZLZkhqNlhLKwpwaXJhLzhJL3d4OU11VmpCYVVpM2ZhR0dUKzhXRjFDc3VVWFZCVlZYMVgxWlJPeHpudVlrYnFGVVExWHlhYzAyCjRzZUc2aWNBcWJJb3YyUk95cUUrcnVWVmhKWDA1OXh0WjNvQlYxc1pYV2hzSHhXem5nR3VKeTdEMFVHNVBwaGkKRXgwYTFpNmlybm44eGVWWllQZDV0eStjNlRTN1J2WU90SHZqWWhpN2tsUGtHZEpTTGxEMVFzK0JIOHVnb0g2UAplNTc2YzVOak9xdW1JUUdJUXplWDlKU24rQjlXVkEyTFhPY2VkUXRrLzNrQ2dZRUE0UEJxMGM2R2RpQklWSGdLCmNtSitxT29VWmcxS2w5YW5OSllhM2J3MXFSUjdzQmprUkZUNEdoOHBVdm04V28yNGVkSE5xejg0akl4cml4MDcKYXYzb1ZHSEZUTHhzV2VtU0hGTVFvM0o4a0x6NysxcTBXM0E3alBmUzk3Um12RHhYbVZESWtKbkgrYUpvaWtGSApDYThJKzE3R25BNXY4U0NZVzBScWNRYjU2VmNDZ1lFQXk0OTAxSTMrS0VnWTd3WjFRaU5PU1lTNzR2UTd3TkFICjZqRk5lWk9PYnBFTzQrUzlUT3R3VFhOcGFITit4TmRJak9JNXozdGtzblUxS0J0ZXRxM3hsTUorOFBMM25vRkwKTHpidXdWYjY0UWhoNVNOdzQ4MXFYd3UyTy9Cb25YMFVIbUxUYVRMUnRMdXdCeHNCaVpyd2Z1ZHZCeGdUdFdqZQpucTN5MWhqNGh5MENnWUFVTDE3V2p2cmY5TXVvME5EWExPR0MxT2FadGMyZ3pJRmFwYkdwZmk4dWlna0RaMmhzCmZWZDZPSnVqdDRkZ2RPRStCVWE0ZkViZHplZ0VwczNqTHYrL09yclN4UUhRRzdhaDFnNWpMRzNqS3lKTmp2a3EKVDJyNG5uQ1BDK0JBT2dYK1d4SjBiMmhUalhCbUg2OTVQZnpIV2R6bXVpRHZlV1pTb2xRTzZucFlwd0tCZ0ZrRwpkbnYzVmE1Y1NidFB3YnlaSUVYNjdRa0c4NU1SNkVRK0o3b0NGSXE2bWg2RkRWMDBvcnJjdkw3WHRCdDJZOTVwCm1ncnAxbEpOL0Y5OENPSXdGTFdRa2wvaWd2VXBhcTVOZ2dIQWZwd29SRmdvTmRrTEgzaE44UGNwM3pieFd2a24KRTNxd3BSSTcrM0pBRjE0TkN4MFZMbk9WemhqS3NvSUhaV3JKSlBoSkFvR0JBTWl5V044b1hiTUNCT05DL1J2ZAoxTE5zZTdZVmw5OWowUXR6ODhOYXUyM3lsZmJPSkpCNE55VUkyaFVFcGk3M3pMejhQVGNWWlU4ODc1bjh2VXlRCitVcnBQWGhkQmZ1Tm1UdEc3QUEyeTNIL0pESEdMVzZCRVRtT1dqTWFBdDNDRGVIa2czajZwdHVQWEQyYllzZU0KMVZPNnArYi9KYU5LMEplcWZJSXU5VUNUCi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: showlist-public-proxy
+  labels:
+    app: showlist-public-proxy
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: showlist-public-proxy
+  labels:
+    app: showlist-public-proxy
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "pods", "services", "endpoints", "secrets"]
+    verbs: [ "get", "list", "watch" ]
+  - apiGroups: [ "extensions" ]
+    resources: [ "ingresses" ]
+    verbs: [ "get", "list", "watch" ]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: showlist-public-proxy
+  labels:
+    app: showlist-public-proxy
+subjects:
+- kind: ServiceAccount
+  name: showlist-public-proxy
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: showlist-public-proxy
+  apiGroup: rbac.authorization.k8s.io
